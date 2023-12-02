@@ -1,13 +1,11 @@
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::PathBuf;
 
 use calamine::Reader;
 use clap::Parser;
 use serde_json::{to_writer, to_writer_pretty};
 
-use to_hood_profile_serializer::layout::DatasetEntry;
-use to_hood_profile_serializer::{open_spreadsheet, parse_spreadsheet};
+use to_hood_profile_serializer::{create_compact_collection, open_spreadsheet, parse_spreadsheet};
 
 #[derive(Parser)]
 #[clap(author, version, about)]
@@ -18,26 +16,36 @@ struct Cli {
     /// Disables pretty-printing
     #[arg(short, long)]
     raw: bool,
+
+    /// Enable verbose output. See documentation on [`to_hood_profile_serializer::CompactEntry`] and
+    /// [`to_hood_profile_serializer::VerboseEntry`] for more details.
+    #[arg(short, long, help = "Enable verbose output. See documentation on CompactEntry and VerboseEntry for more details.")]
+    verbose: bool,
 }
 
 fn main() {
     let opts = Cli::parse();
-    let (path, mut workbook) = open_spreadsheet(opts.year);
+    let (mut path, mut workbook) = open_spreadsheet(&opts.year);
 
     if let Some(Ok(range)) = workbook.worksheet_range_at(0) {
         let mapped = parse_spreadsheet(range);
-        write_json(path, mapped, opts.raw);
-    }
-}
+        path.set_extension("json");
+        let outfile = File::create(path).unwrap();
+        let output = BufWriter::new(outfile);
 
-fn write_json(mut path: PathBuf, result: Vec<DatasetEntry>, raw: bool) {
-    path.set_extension("json");
-    let outfile = File::create(path).unwrap();
-    let output = BufWriter::new(outfile);
-
-    if raw {
-        to_writer(output, &result).expect("Error while writing output");
-    } else {
-        to_writer_pretty(output, &result).expect("Error while writing output");
+        if opts.verbose {
+            if opts.raw {
+                to_writer(output, &mapped).expect("Error while writing output");
+            } else {
+                to_writer_pretty(output, &mapped).expect("Error while writing output");
+            }
+        } else {
+            let collection = create_compact_collection(mapped);
+            if opts.raw {
+                to_writer(output, &collection).expect("Error while writing output");
+            } else {
+                to_writer_pretty(output, &collection).expect("Error while writing output");
+            }
+        }
     }
 }

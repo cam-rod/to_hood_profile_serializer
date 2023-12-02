@@ -4,23 +4,21 @@ use std::path::PathBuf;
 
 use calamine::{open_workbook, DataType, Range, Xlsx};
 
-use layout::DatasetEntry;
-
-use crate::layout::NeighbourhoodPoint;
+pub use layout::{CompactCollection, CompactEntry, VerboseEntry};
 
 pub mod layout;
 
 pub const BASENAME: &str = "neighbourhood-profiles-";
 
-pub fn open_spreadsheet(year: String) -> (PathBuf, Xlsx<BufReader<File>>) {
+pub fn open_spreadsheet(year: &String) -> (PathBuf, Xlsx<BufReader<File>>) {
     let path = PathBuf::from(format!("{}{}.xlsx", BASENAME, year));
     let workbook: Xlsx<BufReader<File>> = open_workbook(&path)
         .unwrap_or_else(|_| panic!("Unable to open spreadsheet at {}.", path.to_str().unwrap()));
     (path, workbook)
 }
 
-pub fn parse_spreadsheet(range: Range<DataType>) -> Vec<DatasetEntry> {
-    let mut mapped: Vec<DatasetEntry> = Vec::new();
+pub fn parse_spreadsheet(range: Range<DataType>) -> Vec<VerboseEntry> {
+    let mut verbose_entries: Vec<VerboseEntry> = Vec::new();
 
     let mut names: Vec<String> = Vec::new();
     for cell in range.rows().next().unwrap().iter().skip(1) {
@@ -33,28 +31,27 @@ pub fn parse_spreadsheet(range: Range<DataType>) -> Vec<DatasetEntry> {
         let raw_row_name = row.get(0).unwrap().as_string().unwrap();
         let row_name = raw_row_name.trim_start();
         // Create entry
-        let mut row_entry = DatasetEntry::new(row_name);
+        let mut row_entry = VerboseEntry::new(row_name);
         for cell in row.iter().skip(1).enumerate().map(|(i, c)| (i, c.as_i64())) {
             if let (idx, Some(value)) = cell {
-                row_entry.data.push(NeighbourhoodPoint {
-                    name: names.get(idx).unwrap().to_string(),
-                    value,
-                })
+                row_entry
+                    .data
+                    .insert(names.get(idx).unwrap().to_string(), value);
             }
         }
 
         let indent = (raw_row_name.len() - row_name.len()) / 2;
         if indent == 0 {
-            mapped.push(row_entry);
+            verbose_entries.push(row_entry);
         } else {
-            insert_tree(mapped.last_mut().unwrap(), row_entry, indent);
+            insert_tree(verbose_entries.last_mut().unwrap(), row_entry, indent);
         }
     }
 
-    mapped
+    verbose_entries
 }
 
-pub fn insert_tree(mapped: &mut DatasetEntry, row_entry: DatasetEntry, layers: usize) {
+pub fn insert_tree(mapped: &mut VerboseEntry, row_entry: VerboseEntry, layers: usize) {
     if layers == 1 {
         mapped.nested.push(row_entry)
     } else {
@@ -72,4 +69,23 @@ pub fn insert_tree(mapped: &mut DatasetEntry, row_entry: DatasetEntry, layers: u
             }
         }
     }
+}
+
+pub fn create_compact_collection(verbose_entries: Vec<VerboseEntry>) -> CompactCollection {
+    let mut collection = CompactCollection::default();
+    for entry in verbose_entries {
+        let mut nested_collection = CompactCollection::default();
+        if !entry.nested.is_empty() {
+            nested_collection.extend(create_compact_collection(entry.nested));
+        }
+
+        collection.insert(
+            entry.name,
+            CompactEntry {
+                data: entry.data,
+                nested: nested_collection,
+            },
+        );
+    }
+    collection
 }
